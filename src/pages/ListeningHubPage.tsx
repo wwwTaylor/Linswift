@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import {
-  ChevronLeft, Headphones, Music, Radio, Library, Clock, Flame, Target,
+  ChevronLeft, Music, Radio, Library, Clock, Flame, Target,
   ChevronRight,
 } from 'lucide-react'
 

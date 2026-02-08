@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ChevronLeft, Upload, BookOpen, Clock, ChevronRight, Search, MoreVertical,
+  ChevronLeft, Upload, Clock, Search, MoreVertical,
 } from 'lucide-react'
 
 /**
