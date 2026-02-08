@@ -1,39 +1,53 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ChevronLeft, Brain, Gamepad2, Sparkles, BookOpen, RotateCcw, Plus, Check,
+  ChevronLeft, Brain, Gamepad2, Sparkles, BookOpen, RotateCcw, Plus,
 } from 'lucide-react'
+import { useVocabulary } from '../hooks/useVocabulary'
+import { getWeeklyPlan, isReviewDue } from '../lib/ebbinghaus'
 
 /**
- * 艾宾浩斯记忆规划看板 —— 背单词模块
- * 功能：
- *  1. 7 天复习计划看板（每天新学 + 复习数量）
- *  2. 整体进度条
- *  3. 统计数字：今日待学、待复习、已掌握
- *  4. 学习模式入口：卡片学习、游戏记忆、AI 速记
- *  5. 今日学习清单
+ * 艾宾浩斯记忆规划看板 —— 接入 Supabase
+ *
+ * 数据来源：
+ * - 统计数字从 user_vocabulary 计算
+ * - 7天计划从词汇的 next_review_at 计算
+ * - 今日学习清单 = 今天到期的词汇
  */
-
-// ===== 7 天计划数据 =====
-const weekPlan = [
-  { day: '周一', newWords: 20, review: 0, done: true },
-  { day: '周二', newWords: 20, review: 10, done: true },
-  { day: '周三', newWords: 20, review: 15, done: true },
-  { day: '周四', newWords: 15, review: 25, done: false, today: true },
-  { day: '周五', newWords: 15, review: 30, done: false },
-  { day: '周六', newWords: 10, review: 35, done: false },
-  { day: '周日', newWords: 0, review: 45, done: false },
-]
-
-// ===== 今日学习清单 =====
-const todayTasks = [
-  { type: '新学', label: '新词汇 Batch #4', count: 15, icon: Plus, color: '#FF8400' },
-  { type: '复习', label: '第 1 轮复习 (周一词汇)', count: 10, icon: RotateCcw, color: '#3B82F6' },
-  { type: '复习', label: '第 2 轮复习 (周二词汇)', count: 8, icon: RotateCcw, color: '#8B5CF6' },
-  { type: '复习', label: '第 3 轮复习 (周三词汇)', count: 7, icon: RotateCcw, color: '#22C55E' },
-]
 
 export default function EbbinghausPage() {
   const navigate = useNavigate()
+  const { vocabulary, loading, fetchVocabulary } = useVocabulary()
+
+  // 加载词汇数据
+  useEffect(() => {
+    fetchVocabulary('all')
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ===== 计算统计数据 =====
+  const todayDueWords = vocabulary.filter(v => isReviewDue(v.next_review_at))
+  const newWords = vocabulary.filter(v => v.review_count === 0)
+  const reviewWords = todayDueWords.filter(v => v.review_count > 0)
+  const masteredWords = vocabulary.filter(v => v.mastery_level >= 4)
+
+  // ===== 7 天计划 =====
+  const weeklyPlan = getWeeklyPlan(vocabulary)
+  const dayNames = ['今天', '明天', '后天', '第4天', '第5天', '第6天', '第7天']
+
+  // ===== 今日学习清单 =====
+  const [todayTasks] = useState(() => [
+    { type: '新学', label: '新词汇学习', countKey: 'new' as const, icon: Plus, color: '#FF8400' },
+    { type: '复习', label: '到期复习', countKey: 'review' as const, icon: RotateCcw, color: '#3B82F6' },
+  ])
+
+  const taskCounts = {
+    new: newWords.length,
+    review: reviewWords.length,
+  }
+
+  // 整体进度
+  const totalWords = vocabulary.length
+  const progressPercent = totalWords > 0 ? Math.round((masteredWords.length / totalWords) * 100) : 0
 
   return (
     <div className="min-h-screen bg-[var(--color-background)]">
@@ -47,19 +61,24 @@ export default function EbbinghausPage() {
 
       {/* ===== 统计卡片 ===== */}
       <div className="grid grid-cols-3 gap-3 mx-5 mb-5">
-        <StatBox value="15" label="今日待学" color="#FF8400" />
-        <StatBox value="25" label="待复习" color="#3B82F6" />
-        <StatBox value="180" label="已掌握" color="#22C55E" />
+        <StatBox value={String(newWords.length)} label="今日待学" color="#FF8400" loading={loading} />
+        <StatBox value={String(reviewWords.length)} label="待复习" color="#3B82F6" loading={loading} />
+        <StatBox value={String(masteredWords.length)} label="已掌握" color="#22C55E" loading={loading} />
       </div>
 
       {/* ===== 整体进度 ===== */}
       <div className="mx-5 mb-5 p-4 bg-[var(--color-card)] rounded-[var(--radius-md)]" style={{ boxShadow: 'var(--shadow-card)' }}>
         <div className="flex items-center justify-between mb-2">
-          <span className="text-[13px] font-semibold text-[var(--color-foreground)]">本周进度</span>
-          <span className="text-[13px] text-[var(--color-primary)] font-bold">180/500 词</span>
+          <span className="text-[13px] font-semibold text-[var(--color-foreground)]">学习进度</span>
+          <span className="text-[13px] text-[var(--color-primary)] font-bold">
+            {masteredWords.length}/{totalWords} 词
+          </span>
         </div>
         <div className="h-2.5 bg-[var(--color-background-secondary)] rounded-full overflow-hidden">
-          <div className="h-full bg-[var(--color-primary)] rounded-full" style={{ width: '36%' }} />
+          <div
+            className="h-full bg-[var(--color-primary)] rounded-full transition-all duration-500"
+            style={{ width: `${progressPercent}%` }}
+          />
         </div>
       </div>
 
@@ -67,26 +86,23 @@ export default function EbbinghausPage() {
       <div className="mx-5 mb-5">
         <h3 className="text-[14px] font-bold text-[var(--color-foreground)] mb-3 font-secondary">7 天记忆规划</h3>
         <div className="flex gap-2 overflow-x-auto pb-2 -mx-5 px-5">
-          {weekPlan.map((d, i) => (
+          {weeklyPlan.map((count, i) => (
             <div
               key={i}
               className={`shrink-0 w-[80px] p-3 rounded-[var(--radius-sm)] text-center transition-colors ${
-                d.today
+                i === 0
                   ? 'bg-[var(--color-primary)] text-white'
-                  : d.done
-                    ? 'bg-[var(--color-success)]/10'
-                    : 'bg-[var(--color-background-secondary)]'
+                  : 'bg-[var(--color-background-secondary)]'
               }`}
             >
-              <p className={`text-[12px] font-semibold mb-1 ${d.today ? 'text-white' : 'text-[var(--color-foreground)]'}`}>
-                {d.day}
+              <p className={`text-[12px] font-semibold mb-1 ${i === 0 ? 'text-white' : 'text-[var(--color-foreground)]'}`}>
+                {dayNames[i]}
               </p>
-              {d.done && <Check size={14} className="text-[var(--color-success)] mx-auto mb-1" />}
-              <p className={`text-[10px] ${d.today ? 'text-white/80' : 'text-[var(--color-muted)]'}`}>
-                +{d.newWords} 新
+              <p className={`text-[18px] font-bold ${i === 0 ? 'text-white' : 'text-[var(--color-foreground)]'}`}>
+                {count}
               </p>
-              <p className={`text-[10px] ${d.today ? 'text-white/80' : 'text-[var(--color-muted)]'}`}>
-                {d.review} 复习
+              <p className={`text-[10px] ${i === 0 ? 'text-white/80' : 'text-[var(--color-muted)]'}`}>
+                词
               </p>
             </div>
           ))}
@@ -110,21 +126,44 @@ export default function EbbinghausPage() {
         </h3>
         <div className="space-y-2">
           {todayTasks.map((task, i) => (
-            <div key={i} className="flex items-center gap-3 p-3 bg-[var(--color-card)] rounded-[var(--radius-sm)]"
-              style={{ boxShadow: 'var(--shadow-card)' }}>
-              <div className="w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0"
-                style={{ backgroundColor: `${task.color}15` }}>
+            <div
+              key={i}
+              className="flex items-center gap-3 p-3 bg-[var(--color-card)] rounded-[var(--radius-sm)]"
+              style={{ boxShadow: 'var(--shadow-card)' }}
+            >
+              <div
+                className="w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0"
+                style={{ backgroundColor: `${task.color}15` }}
+              >
                 <task.icon size={18} style={{ color: task.color }} />
               </div>
               <div className="flex-1">
                 <p className="text-[13px] font-semibold text-[var(--color-foreground)]">{task.label}</p>
-                <p className="text-[11px] text-[var(--color-muted)]">{task.type} · {task.count} 词</p>
+                <p className="text-[11px] text-[var(--color-muted)]">{task.type} · {taskCounts[task.countKey]} 词</p>
               </div>
-              <button className="px-3 py-1.5 bg-[var(--color-primary-light)] rounded-full text-[12px] font-semibold text-[var(--color-primary)]">
+              <button
+                onClick={() => navigate('/flashcard')}
+                className="px-3 py-1.5 bg-[var(--color-primary-light)] rounded-full text-[12px] font-semibold text-[var(--color-primary)]"
+              >
                 开始
               </button>
             </div>
           ))}
+
+          {/* 若词库为空的提示 */}
+          {!loading && vocabulary.length === 0 && (
+            <div className="text-center py-6">
+              <p className="text-[13px] text-[var(--color-muted)]">
+                词库为空，去翻译页收录一些词汇吧
+              </p>
+              <button
+                onClick={() => navigate('/translate')}
+                className="mt-2 text-[13px] text-[var(--color-primary)] font-semibold"
+              >
+                前往翻译 →
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -132,11 +171,13 @@ export default function EbbinghausPage() {
 }
 
 /* ===== 统计数字组件 ===== */
-function StatBox({ value, label, color }: { value: string; label: string; color: string }) {
+function StatBox({ value, label, color, loading }: { value: string; label: string; color: string; loading?: boolean }) {
   return (
     <div className="flex flex-col items-center gap-1 py-4 bg-[var(--color-card)] rounded-[var(--radius-md)]"
       style={{ boxShadow: 'var(--shadow-card)' }}>
-      <span className="text-[22px] font-bold" style={{ color }}>{value}</span>
+      <span className="text-[22px] font-bold" style={{ color }}>
+        {loading ? '-' : value}
+      </span>
       <span className="text-[11px] text-[var(--color-muted)]">{label}</span>
     </div>
   )

@@ -345,6 +345,53 @@ export async function chat(
 }
 
 /**
+ * AI 分析文本中的陌生词汇
+ * 用于阅读准备页，从 PDF 提取的文本中识别难词
+ */
+export async function analyzeUnfamiliarWords(
+  text: string,
+  maxWords: number = 15
+): Promise<UnfamiliarWord[]> {
+  // 截取前 2000 字符用于分析（避免 token 过长）
+  const snippet = text.slice(0, 2000)
+
+  const prompt = `你是一个英语学习助手。请分析以下英文文本，找出其中对中国英语学习者（B1-B2 水平）最可能陌生的词汇。
+
+文本：
+"${snippet}"
+
+请严格按以下 JSON 格式返回（不要包含 markdown 标记）：
+[
+  {"word": "单词", "meaning": "中文释义", "phonetic": "音标"}
+]
+
+注意：
+- 最多返回 ${maxWords} 个最值得学习的词
+- 不要包含太简单的词（如 the, is, have 等）
+- 每个词都要有音标和中文释义
+- 返回合法的 JSON 数组`
+
+  const raw = await callMoonshot([{ role: 'user', content: prompt }])
+  if (raw) {
+    const parsed = parseJSON<UnfamiliarWord[]>(raw)
+    if (parsed && Array.isArray(parsed)) return parsed
+  }
+
+  // Fallback：简单提取长单词作为"陌生词"
+  const words = snippet
+    .split(/\s+/)
+    .filter(w => w.length > 7)
+    .map(w => w.replace(/[^a-zA-Z]/g, ''))
+    .filter(w => w.length > 0)
+  const unique = [...new Set(words)].slice(0, maxWords)
+  return unique.map(w => ({
+    word: w,
+    meaning: '（AI 离线，暂无释义）',
+    phonetic: '',
+  }))
+}
+
+/**
  * AI 词汇分类
  */
 export async function classifyVocabulary(

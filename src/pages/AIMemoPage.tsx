@@ -4,6 +4,7 @@ import {
   ChevronLeft, Sparkles, RefreshCw, Volume2, Star, Clock, Loader2,
 } from 'lucide-react'
 import { chat } from '../services/gemini'
+import { speakAuto, stopSpeaking, isSpeaking } from '../lib/tts'
 
 /**
  * AI 速记生成 —— 背单词模块（接入 Gemini）
@@ -121,8 +122,18 @@ export default function AIMemoPage() {
 
           {/* 操作按钮 */}
           <div className="flex items-center gap-3 pt-3 border-t border-[var(--color-border)]">
-            <button className="flex items-center gap-1.5 px-3 py-2 bg-[var(--color-background-secondary)] rounded-[var(--radius-xs)] text-[12px] text-[var(--color-foreground)]">
-              <Volume2 size={14} /> 朗读
+            <button
+              className="flex items-center gap-1.5 px-3 py-2 bg-[var(--color-background-secondary)] rounded-[var(--radius-xs)] text-[12px] text-[var(--color-foreground)] active:scale-95 transition-transform"
+              onClick={() => {
+                // 如果正在朗读就停止，否则开始朗读故事
+                if (isSpeaking()) {
+                  stopSpeaking()
+                } else if (story) {
+                  speakAuto(story)
+                }
+              }}
+            >
+              <Volume2 size={14} /> {isSpeaking() ? '停止' : '朗读'}
             </button>
             <button
               onClick={generateStory}

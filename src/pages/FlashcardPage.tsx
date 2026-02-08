@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, Volume2, RotateCcw, Check, HelpCircle, X } from 'lucide-react'
+import { useVocabulary } from '../hooks/useVocabulary'
+import { speakEnglish } from '../lib/tts'
 
 /**
  * 卡片学习页 —— 阅读器模块
@@ -23,12 +25,29 @@ const cards = [
 
 export default function FlashcardPage() {
   const navigate = useNavigate()
-  const [currentIndex, setCurrentIndex] = useState(0)   // 当前卡片索引
-  const [isFlipped, setIsFlipped] = useState(false)      // 是否已翻转
-  const [results, setResults] = useState<('know' | 'vague' | 'unknown')[]>([]) // 学习结果
+  const { vocabulary, fetchVocabulary, addReview, updateMastery } = useVocabulary()
+  const [currentIndex, setCurrentIndex] = useState(0)
+  const [isFlipped, setIsFlipped] = useState(false)
+  const [results, setResults] = useState<('know' | 'vague' | 'unknown')[]>([])
 
-  const currentCard = cards[currentIndex]
-  const isFinished = currentIndex >= cards.length        // 是否学完
+  // 尝试从数据库加载词汇；若失败则使用 mock
+  useEffect(() => {
+    fetchVocabulary('all')
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 优先使用数据库词汇；若为空则使用 mock
+  const dbCards = vocabulary.length > 0
+    ? vocabulary.map(v => ({
+        id: v.id,
+        word: v.word,
+        phonetic: v.phonetic || '',
+        meaning: v.meaning || '',
+        example: v.example_sentence || '',
+      }))
+    : cards.map((c, i) => ({ ...c, id: i }))
+
+  const currentCard = dbCards[currentIndex]
+  const isFinished = currentIndex >= dbCards.length
 
   // ===== 翻转卡片 =====
   const handleFlip = () => setIsFlipped(!isFlipped)
@@ -36,8 +55,20 @@ export default function FlashcardPage() {
   // ===== 处理用户选择（会/模糊/不会）=====
   const handleChoice = (choice: 'know' | 'vague' | 'unknown') => {
     setResults(prev => [...prev, choice])
-    setIsFlipped(false) // 重置翻转状态
-    setCurrentIndex(prev => prev + 1) // 下一张
+    setIsFlipped(false)
+    // 异步写入数据库（不阻塞 UI）
+    if (currentCard && vocabulary.length > 0) {
+      const resultMap = { know: 'known', vague: 'fuzzy', unknown: 'unknown' } as const
+      addReview(currentCard.id, resultMap[choice], 'flashcard').catch(() => {})
+      // 更新熟练度
+      const masteryDelta = choice === 'know' ? 1 : choice === 'unknown' ? -1 : 0
+      const current = vocabulary.find(v => v.id === currentCard.id)
+      if (current) {
+        const newLevel = Math.max(0, Math.min(5, current.mastery_level + masteryDelta))
+        updateMastery(currentCard.id, newLevel).catch(() => {})
+      }
+    }
+    setCurrentIndex(prev => prev + 1)
   }
 
   // ===== 重新开始 =====
@@ -61,7 +92,7 @@ export default function FlashcardPage() {
         </button>
         <h1 className="text-[18px] font-bold text-[var(--color-foreground)] font-secondary">词汇学习</h1>
         <span className="text-[13px] text-[var(--color-muted)]">
-          {Math.min(currentIndex + 1, cards.length)}/{cards.length}
+          {Math.min(currentIndex + 1, dbCards.length)}/{dbCards.length}
         </span>
       </div>
 
@@ -69,7 +100,7 @@ export default function FlashcardPage() {
       <div className="mx-5 mb-6 h-1.5 bg-[var(--color-background-secondary)] rounded-full overflow-hidden">
         <div
           className="h-full bg-[var(--color-primary)] rounded-full transition-all duration-300"
-          style={{ width: `${(currentIndex / cards.length) * 100}%` }}
+          style={{ width: `${(currentIndex / dbCards.length) * 100}%` }}
         />
       </div>
 
@@ -82,7 +113,7 @@ export default function FlashcardPage() {
               <Check size={32} className="text-[var(--color-success)]" />
             </div>
             <h2 className="text-[22px] font-bold text-[var(--color-foreground)] mb-2">学习完成！</h2>
-            <p className="text-[14px] text-[var(--color-muted)] mb-6">你已经复习了 {cards.length} 个单词</p>
+            <p className="text-[14px] text-[var(--color-muted)] mb-6">你已经复习了 {dbCards.length} 个单词</p>
 
             {/* 结果统计 */}
             <div className="flex justify-center gap-6 mb-8">
@@ -109,10 +140,10 @@ export default function FlashcardPage() {
                 <RotateCcw size={16} /> 重新学习
               </button>
               <button
-                onClick={() => navigate('/reading')}
-                className="flex-1 py-3 bg-[var(--color-primary)] rounded-[var(--radius-sm)] text-[14px] font-semibold text-white"
+                onClick={() => navigate(-1)}
+                className="flex-1 py-3 bg-[var(--color-primary)] rounded-[var(--radius-sm)] text-[14px] font-semibold text-white flex items-center justify-center gap-2"
               >
-                开始阅读
+                <ChevronLeft size={16} /> 返回
               </button>
             </div>
           </div>
@@ -142,7 +173,7 @@ export default function FlashcardPage() {
                   <p className="text-[14px] text-[var(--color-muted)] mb-4">{currentCard.phonetic}</p>
                   <button
                     className="p-2 rounded-full bg-[var(--color-primary-light)]"
-                    onClick={(e) => { e.stopPropagation() }}
+                    onClick={(e) => { e.stopPropagation(); speakEnglish(currentCard.word) }}
                   >
                     <Volume2 size={20} className="text-[var(--color-primary)]" />
                   </button>

@@ -1,3 +1,14 @@
+/**
+ * 学习页（首页）—— 已接入 AI + Supabase
+ *
+ * 功能：
+ * 1. AI 生成个性化欢迎问候和励志名言
+ * 2. 学习热度图（从 study_records 读取，降级为 mock）
+ * 3. 连续学习天数（从 study_records 计算）
+ * 4. 今日任务四宫格（跳转到各模块）
+ * 5. 图书馆推荐（跳转到书架页）
+ */
+
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -6,27 +17,44 @@ import {
 } from 'lucide-react'
 import HeatMap from '../components/common/HeatMap'
 import { getDailyRecommendation, type DailyRecommendation } from '../services/gemini'
+import { useAuth } from '../contexts/AuthContext'
+import { useStudyRecords, type HeatmapCell } from '../hooks/useStudyRecords'
 
-/**
- * 学习页（首页）—— 已接入 Gemini AI
- * 功能：
- *  1. AI 生成个性化欢迎问候和励志名言（每次刷新不同）
- *  2. 学习热度图（GitHub 风格 3x12）
- *  3. 今日任务四宫格
- *  4. 图书馆推荐
- */
 export default function LearnPage() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const { getHeatmapData, getStreakDays } = useStudyRecords()
 
   // ===== AI 每日推荐状态 =====
   const [recommendation, setRecommendation] = useState<DailyRecommendation | null>(null)
-  const [isLoadingRec, setIsLoadingRec] = useState(true)  // 首次加载
-  const [isRefreshing, setIsRefreshing] = useState(false)  // 刷新中
+  const [isLoadingRec, setIsLoadingRec] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
-  // ===== 页面加载时获取 AI 推荐 =====
+  // ===== 学习数据状态 =====
+  const [heatmapLevels, setHeatmapLevels] = useState<number[]>([])
+  const [streakDays, setStreakDays] = useState(0)
+
+  // ===== 页面加载时获取 AI 推荐 + 学习数据 =====
   useEffect(() => {
     loadRecommendation()
-  }, [])
+    loadStudyData()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ===== 获取学习数据 =====
+  const loadStudyData = async () => {
+    try {
+      // 获取热度图（最近 36 天 = 3行 x 12列）
+      const cells: HeatmapCell[] = await getHeatmapData(36)
+      if (cells.length > 0) {
+        setHeatmapLevels(cells.map(c => c.level))
+      }
+      // 获取连续天数
+      const streak = await getStreakDays()
+      setStreakDays(streak)
+    } catch {
+      // 数据库未就绪时静默失败，使用 HeatMap 的默认 mock 数据
+    }
+  }
 
   // ===== 获取 AI 每日推荐 =====
   const loadRecommendation = async (isRefresh = false) => {
@@ -37,17 +65,18 @@ export default function LearnPage() {
     }
 
     try {
-      // 调用 Gemini 生成每日推荐
       const rec = await getDailyRecommendation()
       setRecommendation(rec)
     } catch {
-      // 失败时使用默认内容（gemini.ts 中已有 fallback）
-      console.warn('AI 推荐加载失败，使用默认内容')
+      console.warn('AI 推荐加载失败')
     } finally {
       setIsLoadingRec(false)
       setIsRefreshing(false)
     }
   }
+
+  // 显示名称
+  const displayName = user?.user_metadata?.username || user?.email?.split('@')[0] || ''
 
   return (
     <div className="px-5 pb-4">
@@ -64,7 +93,6 @@ export default function LearnPage() {
         className="rounded-[var(--radius-lg)] p-5 mb-5 text-white relative overflow-hidden"
         style={{ background: 'linear-gradient(135deg, #FF8400, #FF9E33)' }}
       >
-        {/* 加载态 */}
         {isLoadingRec ? (
           <div className="flex items-center justify-center py-4">
             <Loader2 size={24} className="animate-spin text-white/70" />
@@ -72,11 +100,11 @@ export default function LearnPage() {
           </div>
         ) : recommendation ? (
           <>
-            {/* AI 生成的个性化问候 */}
-            <p className="text-[13px] opacity-90 mb-1">{recommendation.greeting}</p>
+            <p className="text-[13px] opacity-90 mb-1">
+              {recommendation.greeting}{displayName ? `, ${displayName}` : ''}
+            </p>
             <h2 className="text-[22px] font-bold leading-tight">Ready to learn English?</h2>
 
-            {/* AI 每日励志名言 */}
             <div className="mt-3 p-3 bg-white/15 rounded-[12px] backdrop-blur-sm">
               <div className="flex items-start gap-2">
                 <Quote size={14} className="text-white/70 mt-0.5 shrink-0" />
@@ -91,7 +119,6 @@ export default function LearnPage() {
               </div>
             </div>
 
-            {/* 今日小贴士 + 刷新按钮 */}
             <div className="flex items-center justify-between mt-3">
               <span className="text-[12px] opacity-80">💡 {recommendation.todayTip}</span>
               <button
@@ -104,14 +131,13 @@ export default function LearnPage() {
             </div>
           </>
         ) : (
-          /* 默认内容（API 不可用时） */
           <>
-            <p className="text-[13px] opacity-90 mb-1">Good Morning! 👋</p>
+            <p className="text-[13px] opacity-90 mb-1">
+              Good Morning! 👋{displayName ? ` ${displayName}` : ''}
+            </p>
             <h2 className="text-[22px] font-bold leading-tight">Ready to learn English?</h2>
             <div className="flex items-center gap-3 mt-3 text-[12px] opacity-80">
-              <span>🔥 连续学习 7 天</span>
-              <span>·</span>
-              <span>今日已学 23 分钟</span>
+              <span>🔥 连续学习 {streakDays} 天</span>
             </div>
           </>
         )}
@@ -125,19 +151,20 @@ export default function LearnPage() {
             <span className="text-[16px] font-bold text-[var(--color-foreground)] font-secondary">学习热度</span>
           </div>
           <span className="text-[12px] text-[var(--color-primary)] font-semibold flex items-center gap-1">
-            🔥 连续 7 天
+            🔥 连续 {streakDays} 天
           </span>
         </div>
-        <HeatMap />
+        {/* 传入真实数据（如果有），否则 HeatMap 会使用内置 mock */}
+        <HeatMap data={heatmapLevels.length > 0 ? heatmapLevels : undefined} />
       </div>
 
       {/* ===== 今日任务 ===== */}
       <div className="mb-5">
         <h3 className="text-[16px] font-bold text-[var(--color-foreground)] mb-3 font-secondary">今日任务</h3>
         <div className="grid grid-cols-4 gap-3">
-          <TaskCard icon={BookOpen} label="背单词" desc="20/50 词" color="#FFF5EB" iconColor="#FF8400" onClick={() => navigate('/ebbinghaus')} />
-          <TaskCard icon={Headphones} label="听力" desc="3 篇待完成" color="#F0EBFF" iconColor="#8B5CF6" onClick={() => navigate('/listening')} />
-          <TaskCard icon={Mic} label="口语" desc="5 分钟跟读" color="#E8F0FF" iconColor="#3B82F6" onClick={() => navigate('/speaking')} />
+          <TaskCard icon={BookOpen} label="背单词" desc="开始学习" color="#FFF5EB" iconColor="#FF8400" onClick={() => navigate('/ebbinghaus')} />
+          <TaskCard icon={Headphones} label="听力" desc="练习听力" color="#F0EBFF" iconColor="#8B5CF6" onClick={() => navigate('/listening')} />
+          <TaskCard icon={Mic} label="口语" desc="口语训练" color="#E8F0FF" iconColor="#3B82F6" onClick={() => navigate('/speaking')} />
           <TaskCard icon={BookOpenText} label="语法" desc="知识树" color="#E8FFE8" iconColor="#22C55E" onClick={() => navigate('/grammar')} />
         </div>
       </div>
@@ -174,12 +201,12 @@ export default function LearnPage() {
 
 /* ===== 今日任务卡片子组件 ===== */
 interface TaskCardProps {
-  icon: React.ElementType       // Lucide 图标组件
-  label: string                 // 任务名称
-  desc: string                  // 进度描述
-  color: string                 // 图标背景色
-  iconColor: string             // 图标颜色
-  onClick?: () => void          // 点击跳转
+  icon: React.ElementType
+  label: string
+  desc: string
+  color: string
+  iconColor: string
+  onClick?: () => void
 }
 
 function TaskCard({ icon: Icon, label, desc, color, iconColor, onClick }: TaskCardProps) {

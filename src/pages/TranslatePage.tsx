@@ -1,12 +1,15 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import {
-  ArrowLeftRight, Star, Volume2, Copy, X, Sparkles, Loader2,
+  ArrowLeftRight, Star, Volume2, Copy, X, Sparkles, Loader2, Check,
 } from 'lucide-react'
 import {
   translateText,
   type TranslateResult,
   type UnfamiliarWord,
 } from '../services/gemini'
+import { useVocabulary } from '../hooks/useVocabulary'
+import { useTranslations } from '../hooks/useTranslations'
+import { speakEnglish, speakChinese } from '../lib/tts'
 
 /**
  * 翻译页 —— 已接入 Gemini AI
@@ -26,15 +29,23 @@ interface HistoryItem {
 }
 
 export default function TranslatePage() {
+  // ===== Supabase hooks =====
+  const { addWords } = useVocabulary()
+  const { fetchHistory, saveTranslation } = useTranslations()
+
   // ===== 状态管理 =====
-  const [inputText, setInputText] = useState('')          // 用户输入的文本
-  const [sourceLang, setSourceLang] = useState('中文')    // 源语言
-  const [targetLang, setTargetLang] = useState('English')  // 目标语言
-  const [isLoading, setIsLoading] = useState(false)        // 是否正在翻译
-  const [result, setResult] = useState<TranslateResult | null>(null)  // 翻译结果
-  const [error, setError] = useState<string | null>(null)  // 错误信息
-  const [history, setHistory] = useState<HistoryItem[]>([]) // 翻译历史
-  const [copiedText, setCopiedText] = useState(false)      // 复制成功提示
+  const [inputText, setInputText] = useState('')
+  const [sourceLang, setSourceLang] = useState('中文')
+  const [targetLang, setTargetLang] = useState('English')
+  const [isLoading, setIsLoading] = useState(false)
+  const [result, setResult] = useState<TranslateResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [history, setHistory] = useState<HistoryItem[]>([])
+  const [copiedText, setCopiedText] = useState(false)
+  const [collected, setCollected] = useState(false) // 一键收录成功提示
+
+  // 加载翻译历史
+  useEffect(() => { fetchHistory(10) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ===== 切换源语言和目标语言 =====
   const swapLanguages = () => {
@@ -61,12 +72,21 @@ export default function TranslatePage() {
       const translateResult = await translateText(inputText, sourceLang, targetLang)
       setResult(translateResult)
 
-      // 保存到翻译历史（最多保留 10 条）
+      // 保存到本地历史 + 数据库
       setHistory(prev => [{
         source: inputText,
         translated: translateResult.translatedText,
         time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
       }, ...prev].slice(0, 10))
+      // 异步保存到 Supabase（不阻塞 UI）
+      saveTranslation({
+        source_text: inputText,
+        translated_text: translateResult.translatedText,
+        source_lang: sourceLang === '中文' ? 'zh' : 'en',
+        target_lang: targetLang === '中文' ? 'zh' : 'en',
+        unfamiliar_words: translateResult.unfamiliarWords.map(w => w.word),
+      }).catch(() => {})
+      setCollected(false) // 重置收录状态
     } catch (err) {
       // 翻译失败时显示错误提示
       setError(err instanceof Error ? err.message : '翻译失败')
@@ -181,7 +201,11 @@ export default function TranslatePage() {
         {/* 底部工具栏 */}
         <div className="flex items-center justify-between pt-2 border-t border-[var(--color-border)]">
           <div className="flex items-center gap-3">
-            <button className="p-1.5">
+            <button className="p-1.5" onClick={() => {
+              // 根据源语言发音输入文本
+              if (sourceLang === '中文') speakChinese(inputText)
+              else speakEnglish(inputText)
+            }}>
               <Volume2 size={18} className="text-[var(--color-muted)]" />
             </button>
             <button className="p-1.5">
@@ -251,13 +275,37 @@ export default function TranslatePage() {
             </div>
           )}
 
-          {/* 一键收录按钮 */}
+          {/* 一键收录按钮 —— 点击后批量写入 user_vocabulary 表 */}
           {result.unfamiliarWords.length > 0 && (
-            <button className="flex items-center gap-2 mt-4 px-4 py-2.5 bg-[var(--color-primary-light)] rounded-[var(--radius-sm)] w-full justify-center active:scale-[0.98] transition-transform">
-              <Sparkles size={16} className="text-[var(--color-primary)]" />
-              <span className="text-[13px] font-semibold text-[var(--color-primary)]">
-                一键收录 {result.unfamiliarWords.length} 个陌生词汇
-              </span>
+            <button
+              className="flex items-center gap-2 mt-4 px-4 py-2.5 bg-[var(--color-primary-light)] rounded-[var(--radius-sm)] w-full justify-center active:scale-[0.98] transition-transform"
+              disabled={collected}
+              onClick={async () => {
+                const words = result.unfamiliarWords.map(w => ({
+                  word: w.word,
+                  phonetic: w.phonetic,
+                  meaning: w.meaning,
+                  source: 'translate' as const,
+                }))
+                const { error: e } = await addWords(words)
+                if (!e) setCollected(true)
+              }}
+            >
+              {collected ? (
+                <>
+                  <Check size={16} className="text-[var(--color-success)]" />
+                  <span className="text-[13px] font-semibold text-[var(--color-success)]">
+                    已收录到词库
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Sparkles size={16} className="text-[var(--color-primary)]" />
+                  <span className="text-[13px] font-semibold text-[var(--color-primary)]">
+                    一键收录 {result.unfamiliarWords.length} 个陌生词汇
+                  </span>
+                </>
+              )}
             </button>
           )}
         </div>

@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, Check, X, Volume2 } from 'lucide-react'
+import { speakEnglish } from '../lib/tts'
 
 /**
  * 词汇量测试 —— 词汇测试模块
@@ -122,8 +123,11 @@ export default function VocabTestPage() {
               <h2 className="text-[32px] font-bold text-[var(--color-foreground)] mb-4">
                 {currentWord.word}
               </h2>
-              {/* 发音按钮 */}
-              <button className="p-2.5 rounded-full bg-[var(--color-primary-light)] mb-2">
+              {/* 发音按钮 —— 点击朗读当前单词 */}
+              <button
+                className="p-2.5 rounded-full bg-[var(--color-primary-light)] mb-2 active:scale-90 transition-transform"
+                onClick={() => speakEnglish(currentWord.word)}
+              >
                 <Volume2 size={20} className="text-[var(--color-primary)]" />
               </button>
               <p className="text-[12px] text-[var(--color-muted)]">你认识这个单词吗？</p>
