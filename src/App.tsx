@@ -53,6 +53,9 @@ import AboutPage from './pages/AboutPage'
 import WordMatchGame from './pages/WordMatchGame'
 import SpellingGame from './pages/SpellingGame'
 
+// ===== Phase 7 (V3): PDF 阅读器 =====
+import PDFReaderPage from './pages/PDFReaderPage'
+
 /**
  * 应用路由配置
  *
@@ -94,6 +97,7 @@ export default function App() {
       <Route path="/reading-prep" element={<ProtectedRoute><ReadingPrepPage /></ProtectedRoute>} />
       <Route path="/flashcard" element={<ProtectedRoute><FlashcardPage /></ProtectedRoute>} />
       <Route path="/reading" element={<ProtectedRoute><ReadingPage /></ProtectedRoute>} />
+      <Route path="/pdf-reader" element={<ProtectedRoute><PDFReaderPage /></ProtectedRoute>} />
 
       {/* 背单词模块 */}
       <Route path="/ebbinghaus" element={<ProtectedRoute><EbbinghausPage /></ProtectedRoute>} />

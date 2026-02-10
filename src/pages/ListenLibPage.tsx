@@ -13,12 +13,8 @@ import { useAudioPlayer, textToSegments, type AudioSegment } from '../hooks/useA
  *  1. "正在播放" 状态栏 —— 真正的 TTS 播放器
  *  2. "转化图书为博客" 入口
  *  3. 分类标签：全部 / 图书转化 / AI 原创 / 热门
- *  4. 博客/音频列表 —— 点击即可朗读
- *
- * 技术方案：
- *  - 每篇文章附带英文脚本内容
- *  - 点击后用 TTS 朗读全文
- *  - 支持播放/暂停/跳句
+ *  4. 博客/音频列表 —— 点击即可切换并朗读
+ *  5. 退出页面自动停止播放
  */
 
 // ===== 分类标签 =====
@@ -61,6 +57,41 @@ const blogList = [
     tag: '🚀 科学', isNew: false,
     script: `The year twenty twenty-six marks a pivotal moment in space exploration. Multiple private companies are now competing to establish permanent bases on the Moon. Mars missions are in their final planning stages, with crew selection well underway. The James Webb Space Telescope continues to reveal stunning images of distant galaxies, reshaping our understanding of the universe's origins. Meanwhile, asteroid mining startups are attracting serious investment, promising to unlock trillions of dollars in raw materials floating in space. The dream of becoming a multiplanetary species has never felt more achievable.`,
   },
+  {
+    title: 'Deep Work: Rules for Success',
+    type: '图书转化', duration: '3:20', plays: 1850,
+    desc: '如何在分心时代保持深度专注',
+    tag: '📘 成长', isNew: true,
+    script: `Deep work is the ability to focus without distraction on a cognitively demanding task. It's a skill that allows you to quickly master complicated information and produce better results in less time. In our current economy, deep work is becoming increasingly rare at exactly the same time it is becoming increasingly valuable. The few who cultivate this skill will thrive. To succeed with deep work, you must rewire your brain to be comfortable resisting distracting stimuli. This doesn't mean that you have to eliminate distracting behaviors. It's sufficient that you instead eliminate the ability of such behaviors to hijack your attention.`,
+  },
+  {
+    title: 'The Power of Sleep',
+    type: 'AI 原创', duration: '2:40', plays: 720,
+    desc: '科学揭示睡眠对健康和学习的重要性',
+    tag: '😴 健康', isNew: false,
+    script: `Sleep is the single most effective thing we can do to reset our brain and body health each day. Scientists have discovered that during sleep, the brain's glymphatic system activates, essentially washing away toxic waste products that accumulate during waking hours. Without sufficient sleep, these toxins build up, contributing to cognitive decline and even diseases like Alzheimer's. Sleep also plays a crucial role in memory consolidation. During deep sleep stages, the brain replays and strengthens the neural pathways formed during the day. This is why pulling an all-night study session is actually counterproductive. Your brain needs sleep to truly learn.`,
+  },
+  {
+    title: 'The Future of Remote Work',
+    type: 'AI 原创', duration: '2:50', plays: 980,
+    desc: '远程工作的趋势与挑战',
+    tag: '💻 职场', isNew: true,
+    script: `The pandemic permanently changed how we think about work. What started as an emergency response has evolved into a fundamental shift in the global workforce. Companies that once insisted on in-office attendance have discovered that remote workers can be equally or even more productive. However, remote work isn't without its challenges. Loneliness and isolation remain significant concerns. The blurring of boundaries between work and personal life can lead to burnout. Communication gaps can slow down collaboration. The most successful companies are those that have invested in building strong remote cultures, with clear communication norms, regular virtual social events, and flexible schedules that respect different time zones.`,
+  },
+  {
+    title: 'Sapiens: Brief History of Humankind',
+    type: '图书转化', duration: '3:40', plays: 2300,
+    desc: '人类简史中的关键观点与思考',
+    tag: '📚 历史', isNew: false,
+    script: `About seventy thousand years ago, our ancestors were insignificant animals. The most important thing to know about prehistoric humans is that they were unimportant. Their impact on their environment was no greater than that of gorillas or jellyfish. The real difference between us and other animals is not on the individual level. It's on the collective level. Humans control the world because they are the only animals that can cooperate both flexibly and in very large numbers. Ants and bees can work together in large numbers, but they do so in a very rigid manner. Only humans can cooperate flexibly with countless numbers of strangers. That's why we rule the world.`,
+  },
+  {
+    title: 'Mindfulness and Meditation',
+    type: 'AI 原创', duration: '2:20', plays: 550,
+    desc: '正念冥想如何改善心理健康',
+    tag: '🧘 冥想', isNew: false,
+    script: `Mindfulness meditation is not about stopping your thoughts. It's about learning to observe them without judgment. When you sit quietly and focus on your breath, you begin to notice the constant stream of thoughts flowing through your mind. Worries about the future. Regrets about the past. Random memories and fantasies. The practice is simply to notice these thoughts, acknowledge them, and gently return your attention to your breath. Over time, this simple exercise strengthens your ability to focus and reduces the power that anxious thoughts have over you. Research shows that regular meditation can physically change the brain, increasing gray matter in areas associated with emotional regulation.`,
+  },
 ]
 
 export default function ListenLibPage() {
@@ -73,14 +104,23 @@ export default function ListenLibPage() {
   // ===== 使用音频播放器 Hook =====
   const player = useAudioPlayer()
 
-  // ===== 当选中内容变化时，加载新的音频片段 =====
+  // ===== 首次加载时只加载内容（不自动播放） =====
   useEffect(() => {
     const content = blogList[activeContentIndex]
     if (content) {
       const segments: AudioSegment[] = textToSegments(content.script)
       player.loadContent(segments)
     }
-  }, [activeContentIndex]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ===== 退出页面时自动停止播放 =====
+  useEffect(() => {
+    return () => {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel()
+      }
+    }
+  }, [])
 
   const currentContent = blogList[activeContentIndex]
 
@@ -94,13 +134,20 @@ export default function ListenLibPage() {
   // ===== 点击内容 → 切换播放 =====
   const handleSelectContent = (globalIndex: number) => {
     if (globalIndex === activeContentIndex) {
+      // 点击同一项 → 切换播放/暂停
       if (player.isPlaying) {
         player.pause()
       } else {
         player.play()
       }
     } else {
+      // 切换到新内容 → 自动开始播放
       setActiveContentIndex(globalIndex)
+      const content = blogList[globalIndex]
+      if (content) {
+        const segments: AudioSegment[] = textToSegments(content.script)
+        player.loadAndPlay(segments) // 加载并自动播放
+      }
     }
   }
 

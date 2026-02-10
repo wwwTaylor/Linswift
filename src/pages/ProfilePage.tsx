@@ -20,9 +20,8 @@ import { useProfile } from '../hooks/useProfile'
 import { useStudyRecords } from '../hooks/useStudyRecords'
 import { useVocabulary } from '../hooks/useVocabulary'
 
-// 设置菜单项 —— 参照 pencil 设计稿中的 screen-profile
+// 设置菜单项 —— 学习设置已集成到 PDF 阅读器中
 const menuItems = [
-  { icon: '📚', label: '学习设置', desc: '每日目标、学习模式', path: '/learning-settings' },
   { icon: '🔔', label: '提醒通知', desc: '推送通知管理', path: '/notification-settings' },
   { icon: '🎨', label: '主题设置', desc: '外观、字体、语言', path: '/theme-settings' },
   { icon: 'ℹ️', label: '关于我们', desc: 'Linswift v2.1.0', path: '/about' },

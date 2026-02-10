@@ -59,8 +59,10 @@ export interface UseAudioPlayerReturn extends AudioPlayerState {
   prev: () => void
   /** 跳到指定句子 */
   seekTo: (index: number) => void
-  /** 加载新内容 */
+  /** 加载新内容（不自动播放） */
   loadContent: (segments: AudioSegment[]) => void
+  /** 加载新内容并自动播放 */
+  loadAndPlay: (segments: AudioSegment[]) => void
   /** 格式化时间为 mm:ss */
   formatTime: (seconds: number) => string
 }
@@ -316,6 +318,23 @@ export function useAudioPlayer(
     setCurrentTime(0)
   }, [stop])
 
+  // ===== 加载新内容并自动播放 =====
+  const loadAndPlay = useCallback((newSegments: AudioSegment[]) => {
+    stopTTS()
+    clearTimer()
+    setSegments(newSegments)
+    setCurrentIndex(0)
+    setCurrentTime(0)
+    setIsPlaying(true)
+    // 需要延迟一帧让 state 更新后再播放
+    setTimeout(() => {
+      segmentsRef.current = newSegments
+      currentIndexRef.current = 0
+      isPlayingRef.current = true
+      speakSegment(0)
+    }, 50)
+  }, [stopTTS, clearTimer, speakSegment])
+
   // ===== 组件卸载时清理 =====
   useEffect(() => {
     return () => {
@@ -341,6 +360,7 @@ export function useAudioPlayer(
     prev,
     seekTo,
     loadContent,
+    loadAndPlay,
     formatTime: formatTimeHelper,
   }
 }

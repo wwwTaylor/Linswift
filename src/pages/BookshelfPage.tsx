@@ -2,21 +2,23 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, Upload, Clock, Search, MoreVertical, Loader2, Trash2,
+  BookOpen,
 } from 'lucide-react'
 import { supabase, uploadFile, type UserBook } from '../lib/supabase'
-import { extractTextFromPDF, getPDFMetadata } from '../lib/pdf'
+import { extractTextFromPDF, getPDFMetadata, isScannedPDF, ocrExtractFromPDF } from '../lib/pdf'
 import { useAuth } from '../contexts/AuthContext'
 
 /**
- * 书架页 —— 阅读器模块入口（V2：接入 PDF 导入）
+ * 书架页 —— 阅读器模块入口（V3：支持 OCR 导入 + PDF 阅读器）
  *
  * 功能：
- *   1. 从文件选择器导入 PDF
- *   2. 使用 pdfjs-dist 提取文本
+ *   1. 从文件选择器导入 PDF（标准 + OCR 扫描版）
+ *   2. 自动检测扫描版 PDF → OCR 提取文本
  *   3. 上传 PDF 到 Supabase Storage
  *   4. 保存书籍元数据 + 提取文本到数据库
  *   5. 展示真实书籍列表（来自数据库）
- *   6. 点击书籍 → 进入阅读准备页
+ *   6. 点击书籍 → PDF 阅读器（有 PDF 文件）或阅读准备页
+ *   7. 直接打开 PDF 文件阅读入口
  */
 
 // 封面 emoji 随机池
@@ -65,7 +67,7 @@ export default function BookshelfPage() {
     .filter(b => b.progress > 0)
     .slice(0, 5)
 
-  // ===== 导入 PDF =====
+  // ===== 导入 PDF（支持自动检测扫描版 + OCR） =====
   const handleImportPDF = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !user) return
@@ -88,11 +90,25 @@ export default function BookshelfPage() {
       setImportStatus('正在读取 PDF 信息...')
       const meta = await getPDFMetadata(file)
 
-      // 第 2 步：提取全文
-      setImportStatus(`正在提取文本（共 ${meta.numPages} 页）...`)
-      const fullText = await extractTextFromPDF(file)
+      // 第 2 步：检测是否为扫描版 PDF
+      setImportStatus('正在分析 PDF 类型...')
+      const scanned = await isScannedPDF(file)
 
-      // 第 3 步：上传 PDF 到 Supabase Storage
+      // 第 3 步：提取文本
+      let fullText = ''
+      if (scanned) {
+        // 扫描版 → 使用 OCR 提取（逐页渲染+识别）
+        setImportStatus(`扫描版 PDF，启动 OCR 识别（共 ${meta.numPages} 页）...`)
+        fullText = await ocrExtractFromPDF(file, 'eng', (percent, page, total) => {
+          setImportStatus(`OCR 识别中... 第 ${page}/${total} 页 (${percent}%)`)
+        })
+      } else {
+        // 标准文本 PDF → 直接提取
+        setImportStatus(`正在提取文本（共 ${meta.numPages} 页）...`)
+        fullText = await extractTextFromPDF(file)
+      }
+
+      // 第 4 步：上传 PDF 到 Supabase Storage
       setImportStatus('正在上传文件...')
       const filePath = `${user.id}/${Date.now()}_${file.name}`
       let publicUrl = ''
@@ -103,7 +119,7 @@ export default function BookshelfPage() {
         console.warn('PDF 文件上传到 Storage 失败，但文本已提取')
       }
 
-      // 第 4 步：保存到数据库
+      // 第 5 步：保存到数据库
       setImportStatus('正在保存书籍...')
       const randomEmoji = COVER_EMOJIS[Math.floor(Math.random() * COVER_EMOJIS.length)]
       const { error } = await supabase.from('user_books').insert({
@@ -124,7 +140,7 @@ export default function BookshelfPage() {
       }
 
       // 成功！刷新书架
-      setImportStatus('导入成功！')
+      setImportStatus(scanned ? 'OCR 导入成功！' : '导入成功！')
       await fetchBooks()
     } catch (err: any) {
       alert(`导入失败: ${err.message || '未知错误'}`)
@@ -171,7 +187,7 @@ export default function BookshelfPage() {
       </div>
 
       {/* ===== 导入 PDF 按钮 ===== */}
-      <div className="px-5 mb-5">
+      <div className="px-5 mb-4">
         {/* 隐藏的文件选择器 */}
         <input
           ref={fileInputRef}
@@ -199,6 +215,19 @@ export default function BookshelfPage() {
         </button>
       </div>
 
+      {/* ===== 直接打开 PDF 阅读器 ===== */}
+      <div className="px-5 mb-5">
+        <button
+          onClick={() => navigate('/pdf-reader')}
+          className="w-full flex items-center justify-center gap-2 py-3 bg-[var(--color-card)] rounded-[var(--radius-sm)] text-[var(--color-foreground)] active:bg-[var(--color-background-secondary)] transition-colors"
+          style={{ boxShadow: 'var(--shadow-card)' }}
+        >
+          <BookOpen size={16} className="text-[var(--color-primary)]" />
+          <span className="text-[13px] font-medium">直接打开 PDF 阅读器</span>
+          <span className="text-[10px] text-[var(--color-muted)] ml-1">支持 OCR 扫描版</span>
+        </button>
+      </div>
+
       {/* ===== 最近阅读 ===== */}
       {recentReads.length > 0 && (
         <div className="px-5 mb-5">
@@ -209,7 +238,7 @@ export default function BookshelfPage() {
                 key={book.id}
                 className="shrink-0 w-[220px] p-3.5 bg-[var(--color-card)] rounded-[var(--radius-md)] cursor-pointer active:scale-[0.98] transition-transform"
                 style={{ boxShadow: 'var(--shadow-card)' }}
-                onClick={() => navigate(`/reading-prep?bookId=${book.id}`)}
+                onClick={() => navigate(book.file_path ? `/pdf-reader?bookId=${book.id}` : `/reading-prep?bookId=${book.id}`)}
               >
                 <div className="flex items-center gap-2 mb-2">
                   <Clock size={14} className="text-[var(--color-muted)]" />
@@ -264,7 +293,7 @@ export default function BookshelfPage() {
               <div
                 key={book.id}
                 className="flex flex-col items-center cursor-pointer active:scale-[0.96] transition-transform relative group"
-                onClick={() => navigate(`/reading-prep?bookId=${book.id}`)}
+                onClick={() => navigate(book.file_path ? `/pdf-reader?bookId=${book.id}` : `/reading-prep?bookId=${book.id}`)}
               >
                 {/* 封面 */}
                 <div

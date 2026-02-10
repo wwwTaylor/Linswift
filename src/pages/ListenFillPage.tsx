@@ -2,37 +2,31 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ChevronLeft, Play, Pause, SkipBack, SkipForward, Check, X as XIcon,
-  Volume2, RotateCcw,
+  Volume2, RotateCcw, ChevronRight,
 } from 'lucide-react'
 import { stopSpeaking, loadTTSSettings } from '../lib/tts'
 
 /**
  * 听歌填字 —— 听力模块
  *
- * 功能：
- *  1. 专辑封面 + 歌曲信息
- *  2. TTS 逐行朗读歌词（真正的音频播放）
- *  3. 歌词填空 —— 需要用户听清并填写缺失的单词
- *  4. 播放控制：上一句/下一句/播放/暂停
- *  5. 自动评分和反馈
- *
- * 技术方案：
- *  - 使用 SpeechSynthesis (TTS) 朗读每行歌词
- *  - 当朗读到当前填空行时自动高亮
- *  - 用户填写后实时判断对错
+ * 核心玩法：
+ *  1. TTS 逐行朗读歌词
+ *  2. 读到有填空的行时，自动暂停，等待用户填写
+ *  3. 用户填对 → 自动朗读下一行
+ *  4. 用户填错 → 显示正确答案，不自动播放（需手动继续）
+ *  5. 无填空的行 → 自动连续朗读
+ *  6. 支持多首歌曲切换
+ *  7. 退出页面自动停止
  */
 
 // ===== 歌词数据结构 =====
 interface LyricLine {
-  /** 完整歌词文本 */
-  fullText: string
-  /** 需要填空的单词（如果有的话） */
-  blankWord?: string
-  /** 给用户看的带空白的歌词 */
-  displayText: string
+  fullText: string       // 完整歌词文本
+  blankWord?: string     // 需要填空的单词
+  displayText: string    // 带 ___ 占位符的显示文本
 }
 
-// ===== 歌曲列表 =====
+// ===== 歌曲列表（更多歌曲） =====
 const songs = [
   {
     title: 'Shape of You',
@@ -68,6 +62,74 @@ const songs = [
       { fullText: "I wish nothing but the best for you too", blankWord: 'best', displayText: "I wish nothing but the ___ for you too" },
     ] as LyricLine[],
   },
+  {
+    title: 'Let It Be',
+    artist: 'The Beatles',
+    emoji: '🎹',
+    gradient: 'from-[#10B981] to-[#059669]',
+    shadowColor: 'rgba(16,185,129,0.3)',
+    lyrics: [
+      { fullText: "When I find myself in times of trouble", blankWord: 'trouble', displayText: "When I find myself in times of ___" },
+      { fullText: "Mother Mary comes to me", blankWord: undefined, displayText: "Mother Mary comes to me" },
+      { fullText: "Speaking words of wisdom, let it be", blankWord: 'wisdom', displayText: "Speaking words of ___, let it be" },
+      { fullText: "And in my hour of darkness", blankWord: 'darkness', displayText: "And in my hour of ___" },
+      { fullText: "She is standing right in front of me", blankWord: 'standing', displayText: "She is ___ right in front of me" },
+      { fullText: "Speaking words of wisdom, let it be", blankWord: undefined, displayText: "Speaking words of wisdom, let it be" },
+      { fullText: "Let it be, let it be, let it be, let it be", blankWord: undefined, displayText: "Let it be, let it be, let it be, let it be" },
+      { fullText: "Whisper words of wisdom, let it be", blankWord: 'Whisper', displayText: "___ words of wisdom, let it be" },
+    ] as LyricLine[],
+  },
+  {
+    title: 'Yesterday',
+    artist: 'The Beatles',
+    emoji: '🌅',
+    gradient: 'from-[#F59E0B] to-[#D97706]',
+    shadowColor: 'rgba(245,158,11,0.3)',
+    lyrics: [
+      { fullText: "Yesterday, all my troubles seemed so far away", blankWord: 'troubles', displayText: "Yesterday, all my ___ seemed so far away" },
+      { fullText: "Now it looks as though they're here to stay", blankWord: 'stay', displayText: "Now it looks as though they're here to ___" },
+      { fullText: "Oh, I believe in yesterday", blankWord: 'believe', displayText: "Oh, I ___ in yesterday" },
+      { fullText: "Suddenly, I'm not half the man I used to be", blankWord: 'Suddenly', displayText: "___, I'm not half the man I used to be" },
+      { fullText: "There's a shadow hanging over me", blankWord: 'shadow', displayText: "There's a ___ hanging over me" },
+      { fullText: "Oh, yesterday came suddenly", blankWord: 'suddenly', displayText: "Oh, yesterday came ___" },
+      { fullText: "Why she had to go, I don't know, she wouldn't say", blankWord: 'say', displayText: "Why she had to go, I don't know, she wouldn't ___" },
+      { fullText: "I said something wrong, now I long for yesterday", blankWord: 'wrong', displayText: "I said something ___, now I long for yesterday" },
+    ] as LyricLine[],
+  },
+  {
+    title: 'Perfect',
+    artist: 'Ed Sheeran',
+    emoji: '💕',
+    gradient: 'from-[#EC4899] to-[#BE185D]',
+    shadowColor: 'rgba(236,72,153,0.3)',
+    lyrics: [
+      { fullText: "I found a love for me", blankWord: 'love', displayText: "I found a ___ for me" },
+      { fullText: "Darling just dive right in and follow my lead", blankWord: 'follow', displayText: "Darling just dive right in and ___ my lead" },
+      { fullText: "Well I found a girl, beautiful and sweet", blankWord: 'beautiful', displayText: "Well I found a girl, ___ and sweet" },
+      { fullText: "Oh I never knew you were the someone waiting for me", blankWord: 'waiting', displayText: "Oh I never knew you were the someone ___ for me" },
+      { fullText: "Cause we were just kids when we fell in love", blankWord: undefined, displayText: "Cause we were just kids when we fell in love" },
+      { fullText: "Not knowing what it was", blankWord: 'knowing', displayText: "Not ___ what it was" },
+      { fullText: "I will not give you up this time", blankWord: 'give', displayText: "I will not ___ you up this time" },
+      { fullText: "Baby I'm dancing in the dark with you between my arms", blankWord: 'dancing', displayText: "Baby I'm ___ in the dark with you between my arms" },
+    ] as LyricLine[],
+  },
+  {
+    title: 'Imagine',
+    artist: 'John Lennon',
+    emoji: '☮️',
+    gradient: 'from-[#3B82F6] to-[#1D4ED8]',
+    shadowColor: 'rgba(59,130,246,0.3)',
+    lyrics: [
+      { fullText: "Imagine there's no heaven", blankWord: 'heaven', displayText: "Imagine there's no ___" },
+      { fullText: "It's easy if you try", blankWord: 'easy', displayText: "It's ___ if you try" },
+      { fullText: "No hell below us", blankWord: undefined, displayText: "No hell below us" },
+      { fullText: "Above us only sky", blankWord: 'sky', displayText: "Above us only ___" },
+      { fullText: "Imagine all the people living for today", blankWord: 'living', displayText: "Imagine all the people ___ for today" },
+      { fullText: "Imagine there's no countries", blankWord: 'countries', displayText: "Imagine there's no ___" },
+      { fullText: "It isn't hard to do", blankWord: undefined, displayText: "It isn't hard to do" },
+      { fullText: "Nothing to kill or die for", blankWord: 'die', displayText: "Nothing to kill or ___ for" },
+    ] as LyricLine[],
+  },
 ]
 
 // ===== 填空状态 =====
@@ -77,7 +139,8 @@ export default function ListenFillPage() {
   const navigate = useNavigate()
 
   // ===== 歌曲选择 =====
-  const [songIndex] = useState(0) // 可以后续做歌曲切换
+  const [songIndex, setSongIndex] = useState(0)
+  const [showSongPicker, setShowSongPicker] = useState(false) // 歌曲选择弹窗
   const song = songs[songIndex]
 
   // ===== 播放状态 =====
@@ -86,16 +149,22 @@ export default function ListenFillPage() {
   const isPlayingRef = useRef(false)
   const currentLineRef = useRef(0)
 
-  // ===== 填空状态 =====
-  const [blankStatuses, setBlankStatuses] = useState<BlankStatus[]>(
-    song.lyrics.map((line, i) => {
-      if (!line.blankWord) return 'correct' // 无填空的行直接标记为正确
-      return i === 0 ? 'active' : 'locked'
+  // ===== 填空状态（每首歌独立管理） =====
+  const initBlankStatuses = useCallback((lyrics: LyricLine[]) => {
+    return lyrics.map((line, i) => {
+      if (!line.blankWord) return 'correct' as BlankStatus // 无填空的行直接标记为正确
+      return (i === 0 ? 'active' : 'locked') as BlankStatus
     })
-  )
+  }, [])
+
+  const [blankStatuses, setBlankStatuses] = useState<BlankStatus[]>(initBlankStatuses(song.lyrics))
   const [userInputs, setUserInputs] = useState<Record<number, string>>({})
   const [activeInput, setActiveInput] = useState('')
   const [score, setScore] = useState({ correct: 0, wrong: 0 })
+
+  // blankStatuses 的 ref，给 speakLine 内部用
+  const blankStatusesRef = useRef(blankStatuses)
+  useEffect(() => { blankStatusesRef.current = blankStatuses }, [blankStatuses])
 
   // ===== 找到第一个 active 的填空行索引 =====
   const activeLineIndex = blankStatuses.findIndex(s => s === 'active')
@@ -104,7 +173,7 @@ export default function ListenFillPage() {
   useEffect(() => { isPlayingRef.current = isPlaying }, [isPlaying])
   useEffect(() => { currentLineRef.current = currentLineIndex }, [currentLineIndex])
 
-  // ===== 朗读指定行 =====
+  // ===== 朗读指定行（只读一行，不会自动连续） =====
   const speakLine = useCallback((index: number) => {
     if (index >= song.lyrics.length) {
       setIsPlaying(false)
@@ -114,9 +183,7 @@ export default function ListenFillPage() {
     const line = song.lyrics[index]
     setCurrentLineIndex(index)
 
-    // 使用 SpeechSynthesis 朗读
     if (!('speechSynthesis' in window)) return
-
     stopSpeaking()
 
     const settings = loadTTSSettings()
@@ -126,33 +193,38 @@ export default function ListenFillPage() {
     utterance.volume = settings.volume
     utterance.pitch = 1
 
-    // 匹配语音
     const voices = window.speechSynthesis.getVoices()
     const bestVoice = voices.find(v => v.lang === settings.accent)
       || voices.find(v => v.lang.startsWith('en'))
     if (bestVoice) utterance.voice = bestVoice
 
-    // 朗读完当前行后，自动进入下一行
+    // 关键逻辑：当前行朗读完后
     utterance.onend = () => {
+      // 当前行有填空且尚未作答 → 停下来等用户填写
+      if (line.blankWord && blankStatusesRef.current[index] === 'active') {
+        setIsPlaying(false) // 暂停，等待用户填写
+        return
+      }
+
+      // 当前行无填空，或已作答 → 检查下一行
       if (isPlayingRef.current) {
-        // 延迟 0.5 秒后播放下一行
-        setTimeout(() => {
-          if (isPlayingRef.current) {
-            const nextIdx = currentLineRef.current + 1
-            if (nextIdx < song.lyrics.length) {
+        const nextIdx = index + 1
+        if (nextIdx < song.lyrics.length) {
+          // 下一行有待填空 → 朗读下一行后会停下
+          setTimeout(() => {
+            if (isPlayingRef.current) {
               speakLine(nextIdx)
-            } else {
-              setIsPlaying(false) // 全部播放完毕
             }
-          }
-        }, 500)
+          }, 400)
+        } else {
+          setIsPlaying(false) // 全部播放完毕
+        }
       }
     }
 
     utterance.onerror = () => {
-      // 出错时也尝试继续
       if (isPlayingRef.current) {
-        const nextIdx = currentLineRef.current + 1
+        const nextIdx = index + 1
         if (nextIdx < song.lyrics.length) {
           setTimeout(() => speakLine(nextIdx), 300)
         } else {
@@ -180,9 +252,7 @@ export default function ListenFillPage() {
     const prev = Math.max(0, currentLineIndex - 1)
     stopSpeaking()
     setCurrentLineIndex(prev)
-    if (isPlaying) {
-      speakLine(prev)
-    }
+    if (isPlaying) speakLine(prev)
   }, [currentLineIndex, isPlaying, speakLine])
 
   // ===== 下一句 =====
@@ -190,16 +260,35 @@ export default function ListenFillPage() {
     const next = Math.min(song.lyrics.length - 1, currentLineIndex + 1)
     stopSpeaking()
     setCurrentLineIndex(next)
-    if (isPlaying) {
-      speakLine(next)
-    }
+    if (isPlaying) speakLine(next)
   }, [currentLineIndex, song.lyrics.length, isPlaying, speakLine])
 
-  // ===== 重新朗读当前行（点击喇叭） =====
-  const replayCurrentLine = useCallback((lineIndex: number) => {
+  // ===== 重新朗读当前行 =====
+  const replayLine = useCallback((lineIndex: number) => {
     stopSpeaking()
-    speakLine(lineIndex)
-  }, [speakLine])
+    // 单行重听，不影响 isPlaying 状态
+    setCurrentLineIndex(lineIndex)
+
+    if (!('speechSynthesis' in window)) return
+    const line = song.lyrics[lineIndex]
+    const settings = loadTTSSettings()
+    const utterance = new SpeechSynthesisUtterance(line.fullText)
+    utterance.lang = settings.accent
+    utterance.rate = settings.rate * 0.85
+    utterance.volume = settings.volume
+    utterance.pitch = 1
+
+    const voices = window.speechSynthesis.getVoices()
+    const bestVoice = voices.find(v => v.lang === settings.accent)
+      || voices.find(v => v.lang.startsWith('en'))
+    if (bestVoice) utterance.voice = bestVoice
+
+    // 单行重听：朗读完就停下来，不会自动继续
+    utterance.onend = () => { /* 单行重听结束，不做任何事 */ }
+    utterance.onerror = () => { /* 忽略错误 */ }
+
+    window.speechSynthesis.speak(utterance)
+  }, [song.lyrics])
 
   // ===== 提交填空答案 =====
   const submitAnswer = useCallback(() => {
@@ -211,11 +300,10 @@ export default function ListenFillPage() {
     const correctAnswer = line.blankWord.toLowerCase()
     const isCorrect = userAnswer === correctAnswer
 
-    // 更新状态
+    // 更新填空状态
     setBlankStatuses(prev => {
       const newStatuses = [...prev]
       newStatuses[activeLineIndex] = isCorrect ? 'correct' : 'wrong'
-
       // 解锁下一个填空行
       const nextBlank = newStatuses.findIndex((s, i) => i > activeLineIndex && s === 'locked')
       if (nextBlank >= 0) {
@@ -235,25 +323,53 @@ export default function ListenFillPage() {
 
     // 清空输入
     setActiveInput('')
-  }, [activeLineIndex, activeInput, song.lyrics])
 
-  // ===== 重新开始 =====
+    // 填对了 → 自动播放下一行
+    if (isCorrect) {
+      const nextIdx = activeLineIndex + 1
+      if (nextIdx < song.lyrics.length) {
+        setTimeout(() => {
+          setIsPlaying(true)
+          isPlayingRef.current = true
+          speakLine(nextIdx)
+        }, 600) // 给一个短暂的反馈时间后自动播放下一行
+      }
+    }
+    // 填错了 → 不自动播放，用户可以手动按播放或重听
+  }, [activeLineIndex, activeInput, song.lyrics, speakLine])
+
+  // ===== 切换歌曲 =====
+  const switchSong = useCallback((newIndex: number) => {
+    stopSpeaking()
+    setIsPlaying(false)
+    setSongIndex(newIndex)
+    setCurrentLineIndex(0)
+    setBlankStatuses(initBlankStatuses(songs[newIndex].lyrics))
+    setUserInputs({})
+    setActiveInput('')
+    setScore({ correct: 0, wrong: 0 })
+    setShowSongPicker(false)
+  }, [initBlankStatuses])
+
+  // ===== 重新开始当前歌曲 =====
   const restart = useCallback(() => {
     stopSpeaking()
     setIsPlaying(false)
     setCurrentLineIndex(0)
-    setBlankStatuses(song.lyrics.map((line, i) => {
-      if (!line.blankWord) return 'correct'
-      return i === 0 ? 'active' : 'locked'
-    }))
+    setBlankStatuses(initBlankStatuses(song.lyrics))
     setUserInputs({})
     setActiveInput('')
     setScore({ correct: 0, wrong: 0 })
-  }, [song.lyrics])
+  }, [song.lyrics, initBlankStatuses])
 
-  // ===== 组件卸载时停止 =====
+  // ===== 退出页面自动停止 =====
   useEffect(() => {
-    return () => { stopSpeaking() }
+    return () => {
+      stopSpeaking()
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel()
+      }
+    }
   }, [])
 
   // ===== 播放进度 =====
@@ -261,7 +377,6 @@ export default function ListenFillPage() {
     ? ((currentLineIndex + 1) / song.lyrics.length) * 100
     : 0
 
-  // ===== 总填空数 =====
   const totalBlanks = song.lyrics.filter(l => l.blankWord).length
   const isAllDone = !blankStatuses.includes('locked') && !blankStatuses.includes('active')
 
@@ -281,13 +396,23 @@ export default function ListenFillPage() {
       </div>
 
       {/* ===== 专辑封面 + 信息 ===== */}
-      <div className="flex flex-col items-center px-5 mb-5">
-        <div className={`w-[140px] h-[140px] rounded-[20px] bg-gradient-to-br ${song.gradient} flex items-center justify-center mb-3`}
-          style={{ boxShadow: `0 8px 30px ${song.shadowColor}` }}>
-          <span className="text-[52px]">{song.emoji}</span>
+      <div className="flex flex-col items-center px-5 mb-4">
+        <div
+          className={`w-[120px] h-[120px] rounded-[18px] bg-gradient-to-br ${song.gradient} flex items-center justify-center mb-3 cursor-pointer active:scale-95 transition-transform`}
+          style={{ boxShadow: `0 8px 30px ${song.shadowColor}` }}
+          onClick={() => setShowSongPicker(true)}
+        >
+          <span className="text-[48px]">{song.emoji}</span>
         </div>
         <h2 className="text-[18px] font-bold text-[var(--color-foreground)]">{song.title}</h2>
-        <p className="text-[13px] text-[var(--color-muted)]">{song.artist}</p>
+        <p className="text-[13px] text-[var(--color-muted)] mb-1">{song.artist}</p>
+        {/* 点击切换歌曲 */}
+        <button
+          onClick={() => setShowSongPicker(true)}
+          className="text-[11px] text-[var(--color-primary)] flex items-center gap-1"
+        >
+          切换歌曲 <ChevronRight size={12} />
+        </button>
       </div>
 
       {/* ===== 播放进度条 ===== */}
@@ -327,6 +452,15 @@ export default function ListenFillPage() {
         </button>
       </div>
 
+      {/* ===== 提示信息 ===== */}
+      {activeLineIndex >= 0 && !isPlaying && (
+        <div className="mx-5 mb-3 px-3 py-2 bg-[var(--color-primary-light)] rounded-[var(--radius-xs)] text-center">
+          <p className="text-[11px] text-[var(--color-primary)]">
+            🎧 听清后填写空白单词，填对自动播放下一句
+          </p>
+        </div>
+      )}
+
       {/* ===== 歌词填空区域 ===== */}
       <div className="flex-1 px-5 overflow-y-auto pb-8">
         <h3 className="text-[14px] font-bold text-[var(--color-foreground)] mb-3 font-secondary">歌词填空</h3>
@@ -356,7 +490,7 @@ export default function ListenFillPage() {
                   {/* 朗读按钮 —— 点击可重新朗读这行 */}
                   <button
                     className="p-1 shrink-0 mt-0.5 active:scale-90 transition-transform"
-                    onClick={() => replayCurrentLine(i)}
+                    onClick={() => replayLine(i)}
                   >
                     <Volume2 size={14} className={
                       isCurrentlyReading && isPlaying
@@ -368,13 +502,11 @@ export default function ListenFillPage() {
                   {/* 歌词内容 */}
                   <p className="text-[14px] text-[var(--color-foreground)] leading-relaxed flex-1">
                     {!line.blankWord ? (
-                      // 无填空行：直接显示
                       <span>{line.fullText}</span>
                     ) : (
                       <>
                         {parts[0]}
                         {status === 'active' ? (
-                          // 当前活跃的填空
                           <span className="inline-flex items-center gap-1">
                             <input
                               type="text"
@@ -395,12 +527,10 @@ export default function ListenFillPage() {
                             </button>
                           </span>
                         ) : status === 'correct' ? (
-                          // 答对了
                           <span className="inline-flex items-center gap-1 mx-1 px-2 py-0.5 bg-[var(--color-success)]/10 rounded text-[var(--color-success)] font-semibold">
                             {line.blankWord} <Check size={12} />
                           </span>
                         ) : status === 'wrong' ? (
-                          // 答错了（显示用户答案 + 正确答案）
                           <span className="inline-flex items-center gap-1 mx-1">
                             <span className="px-2 py-0.5 bg-[var(--color-error)]/10 rounded text-[var(--color-error)] font-semibold line-through">
                               {userInputs[i] || '?'}
@@ -411,7 +541,6 @@ export default function ListenFillPage() {
                             <XIcon size={12} className="text-[var(--color-error)]" />
                           </span>
                         ) : (
-                          // 锁定状态
                           <span className="inline-block mx-1 w-[80px] border-b border-dashed border-[var(--color-muted)] text-center text-[var(--color-muted)]">
                             ···
                           </span>
@@ -442,15 +571,61 @@ export default function ListenFillPage() {
                 <RotateCcw size={14} /> 重新来过
               </button>
               <button
-                onClick={() => { stopSpeaking(); navigate(-1) }}
+                onClick={() => setShowSongPicker(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] rounded-[var(--radius-sm)] text-[13px] font-semibold text-white"
               >
-                返回听力中心
+                换一首歌
               </button>
             </div>
           </div>
         )}
       </div>
+
+      {/* ===== 歌曲选择弹窗 ===== */}
+      {showSongPicker && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center">
+          {/* 背景遮罩 */}
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setShowSongPicker(false)}
+          />
+          {/* 弹窗内容 */}
+          <div className="relative w-full max-w-[430px] bg-[var(--color-background)] rounded-t-[20px] p-5 pb-8 animate-slide-up">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-[16px] font-bold text-[var(--color-foreground)]">选择歌曲</h3>
+              <button onClick={() => setShowSongPicker(false)} className="p-1">
+                <XIcon size={20} className="text-[var(--color-muted)]" />
+              </button>
+            </div>
+            <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+              {songs.map((s, i) => (
+                <div
+                  key={i}
+                  onClick={() => switchSong(i)}
+                  className={`flex items-center gap-3 p-3 rounded-[var(--radius-sm)] cursor-pointer active:scale-[0.98] transition-transform ${
+                    i === songIndex
+                      ? 'bg-[var(--color-primary-light)] border border-[var(--color-primary)]/20'
+                      : 'bg-[var(--color-card)]'
+                  }`}
+                >
+                  <div className={`w-12 h-12 rounded-[10px] bg-gradient-to-br ${s.gradient} flex items-center justify-center shrink-0`}>
+                    <span className="text-[24px]">{s.emoji}</span>
+                  </div>
+                  <div className="flex-1">
+                    <p className={`text-[14px] font-semibold ${
+                      i === songIndex ? 'text-[var(--color-primary)]' : 'text-[var(--color-foreground)]'
+                    }`}>{s.title}</p>
+                    <p className="text-[12px] text-[var(--color-muted)]">{s.artist} · {s.lyrics.filter(l => l.blankWord).length} 个填空</p>
+                  </div>
+                  {i === songIndex && (
+                    <Check size={18} className="text-[var(--color-primary)] shrink-0" />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
