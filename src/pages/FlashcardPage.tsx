@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, Volume2, RotateCcw, Check, HelpCircle, X } from 'lucide-react'
 import { useVocabulary } from '../hooks/useVocabulary'
+import { useStudyRecords } from '../hooks/useStudyRecords'
+import { calculateNextReview } from '../lib/ebbinghaus'
 import { speakEnglish } from '../lib/tts'
 
 /**
@@ -25,7 +27,8 @@ const cards = [
 
 export default function FlashcardPage() {
   const navigate = useNavigate()
-  const { vocabulary, fetchVocabulary, addReview, updateMastery } = useVocabulary()
+  const { vocabulary, fetchVocabulary, addReview, updateNextReview } = useVocabulary()
+  const { appendStudy } = useStudyRecords()
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isFlipped, setIsFlipped] = useState(false)
   const [results, setResults] = useState<('know' | 'vague' | 'unknown')[]>([])
@@ -53,21 +56,32 @@ export default function FlashcardPage() {
   const handleFlip = () => setIsFlipped(!isFlipped)
 
   // ===== 处理用户选择（会/模糊/不会）=====
-  const handleChoice = (choice: 'know' | 'vague' | 'unknown') => {
+  const handleChoice = async (choice: 'know' | 'vague' | 'unknown') => {
     setResults(prev => [...prev, choice])
     setIsFlipped(false)
     // 异步写入数据库（不阻塞 UI）
+    const resultMap = { know: 'known', vague: 'fuzzy', unknown: 'unknown' } as const
+
     if (currentCard && vocabulary.length > 0) {
-      const resultMap = { know: 'known', vague: 'fuzzy', unknown: 'unknown' } as const
-      addReview(currentCard.id, resultMap[choice], 'flashcard').catch(() => {})
-      // 更新熟练度
-      const masteryDelta = choice === 'know' ? 1 : choice === 'unknown' ? -1 : 0
       const current = vocabulary.find(v => v.id === currentCard.id)
+      addReview(currentCard.id, resultMap[choice], 'flashcard').catch(() => {})
+
       if (current) {
-        const newLevel = Math.max(0, Math.min(5, current.mastery_level + masteryDelta))
-        updateMastery(currentCard.id, newLevel).catch(() => {})
+        const review = calculateNextReview(current.mastery_level, resultMap[choice])
+        updateNextReview(
+          currentCard.id,
+          review.nextReviewAt,
+          (current.review_count || 0) + 1,
+          review.newMastery
+        ).catch(() => {})
       }
     }
+
+    appendStudy({
+      study_duration: 1,
+      vocabulary_learned: choice === 'know' ? 1 : 0,
+    }).catch(() => {})
+
     setCurrentIndex(prev => prev + 1)
   }
 

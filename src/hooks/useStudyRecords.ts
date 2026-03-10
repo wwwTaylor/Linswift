@@ -120,6 +120,36 @@ export function useStudyRecords() {
     [user, queryClient]
   )
 
+  // ===== 增量记录学习数据（在原有基础上 +N） =====
+  const appendStudy = useCallback(
+    async (increments: {
+      study_duration?: number
+      vocabulary_learned?: number
+      listening_minutes?: number
+      speaking_minutes?: number
+      reading_pages?: number
+    }) => {
+      if (!user) return
+
+      const base = todayRecord ?? {
+        study_duration: 0,
+        vocabulary_learned: 0,
+        listening_minutes: 0,
+        speaking_minutes: 0,
+        reading_pages: 0,
+      }
+
+      await recordStudy({
+        study_duration: (base.study_duration || 0) + (increments.study_duration || 0),
+        vocabulary_learned: (base.vocabulary_learned || 0) + (increments.vocabulary_learned || 0),
+        listening_minutes: (base.listening_minutes || 0) + (increments.listening_minutes || 0),
+        speaking_minutes: (base.speaking_minutes || 0) + (increments.speaking_minutes || 0),
+        reading_pages: (base.reading_pages || 0) + (increments.reading_pages || 0),
+      })
+    },
+    [user, todayRecord, recordStudy]
+  )
+
   // ===== 计算连续学习天数 =====
   const getStreakDays = useCallback(async (): Promise<number> => {
     if (!user) return 0
@@ -158,6 +188,7 @@ export function useStudyRecords() {
     getHeatmapData,
     fetchTodayRecord,
     recordStudy,
+    appendStudy,
     getStreakDays,
   }
 }

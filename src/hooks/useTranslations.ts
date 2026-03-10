@@ -63,11 +63,11 @@ export function useTranslations() {
         .select()
         .single()
 
-      if (err) return { error: err.message }
+      if (err) return { error: err.message, data: null }
 
       // 更新本地列表（添加到头部）
       if (data) setHistory(prev => [data, ...prev])
-      return { error: null }
+      return { error: null, data: data || null }
     },
     [user]
   )
